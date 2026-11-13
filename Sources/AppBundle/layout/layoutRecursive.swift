@@ -32,6 +32,8 @@ extension TreeNode {
                 // todo make it parallel among different workspaces. Get rid of 'try await'
                 let rects = try await windows.mapConcurrently { try await $0.getAxRect(.cancellable) } // Probably not idempotent
                 for (window, windowRect) in zip(windows, rects) {
+                    // A move command may have rebound the window while the AX batch was suspended.
+                    guard window.parent === container else { continue }
                     window.lastAppliedLayoutPhysicalRect = nil
                     window.lastAppliedLayoutVirtualRect = nil
                     window.layoutFloatingWindow(context, windowRect)
