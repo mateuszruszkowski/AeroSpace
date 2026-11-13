@@ -159,14 +159,19 @@ final class MacApp: AbstractApp {
         } else {
             MacApp.focusJob = withWindowAsync(windowId, .cancellable) { [nsApp] window, job in
                 // Raise firstly to make sure that by the time we activate the app, the window would be already on top
-                window.set(Ax.isMainAttr, true)
-                AXUIElementPerformAction(window, kAXRaiseAction as CFString)
-                if #available(macOS 14, *) {
-                    nsApp.activate()
-                } else {
-                    // Deprecated since #macos14
-                    nsApp.activate(options: .activateIgnoringOtherApps)
-                }
+                try performNativeFocus(
+                    job: job,
+                    setMain: { window.set(Ax.isMainAttr, true) },
+                    raise: { AXUIElementPerformAction(window, kAXRaiseAction as CFString) },
+                    activate: {
+                        if #available(macOS 14, *) {
+                            nsApp.activate()
+                        } else {
+                            // Deprecated since #macos14
+                            nsApp.activate(options: .activateIgnoringOtherApps)
+                        }
+                    },
+                )
             }
         }
     }
@@ -426,6 +431,21 @@ final class MacApp: AbstractApp {
             try? body(window.ax, job)
         } ?? .cancelled
     }
+}
+
+func performNativeFocus(
+    job: RunLoopJob,
+    setMain: () -> Void,
+    raise: () -> Void,
+    activate: () -> Void,
+) throws {
+    try job.checkCancellation()
+    setMain()
+    // AX calls can block while another focus request cancels this job.
+    try job.checkCancellation()
+    raise()
+    try job.checkCancellation()
+    activate()
 }
 
 private final class AxWindow {
