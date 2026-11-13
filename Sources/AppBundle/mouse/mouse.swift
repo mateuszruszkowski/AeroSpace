@@ -52,5 +52,17 @@ nonisolated func isAxWindowUnderMouse(_ location: Point) async -> Bool? {
         return nil
     }
     guard let element else { return nil }
-    return element.get(Ax.parentWindowRecursive) != nil || element.get(Ax.roleAttr) == kAXWindowRole
+    let parentWindow = element.get(Ax.parentWindowRecursive)
+    return isAxWindowHit(
+        role: parentWindow == nil ? element.get(Ax.roleAttr) : nil,
+        subrole: element.get(Ax.subroleAttr),
+        parentWindowSubrole: parentWindow?.get(Ax.subroleAttr),
+        hasParentWindow: parentWindow != nil,
+    )
+}
+
+func isAxWindowHit(role: String?, subrole: String?, parentWindowSubrole: String?, hasParentWindow: Bool) -> Bool {
+    // Finder's desktop can be returned by AXWindow despite not being a real window.
+    if subrole == "AXDesktop" || parentWindowSubrole == "AXDesktop" { return false }
+    return hasParentWindow || role == kAXWindowRole
 }
