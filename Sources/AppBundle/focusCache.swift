@@ -13,5 +13,5 @@ import Common
         _ = nativeFocused?.focusWindow()
         lastKnownNativeFocusedWindowId = nativeFocused?.windowId
     }
-    nativeFocused?.macAppUnsafe.lastFocusedNativeWindowOpaqueId = nativeFocused?.windowId
+    (nativeFocused?.app as? MacApp)?.lastFocusedNativeWindowOpaqueId = nativeFocused?.windowId
 }

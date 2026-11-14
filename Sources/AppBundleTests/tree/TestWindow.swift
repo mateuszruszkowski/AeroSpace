@@ -5,6 +5,7 @@ import Common
 final class TestWindow: Window, CustomStringConvertible {
     private var _rect: Rect?
     var isMacosFullscreenForTest = false
+    var appliedFramesForTest: [(Point?, CGSize?)] = []
     // In production, getAxRect is a real suspension point (the read is dispatched to the app AX thread), but the mock
     // returns right away. The hook is reset after the first invocation
     @MainActor var onNextGetAxRectForTest: (@MainActor () async throws -> ())?
@@ -50,6 +51,12 @@ final class TestWindow: Window, CustomStringConvertible {
     }
 
     override func isMacosFullscreen(_ cm: CancellationMode) async throws -> Bool { isMacosFullscreenForTest }
+
+    override var isHiddenInCorner: Bool { false }
+
+    override func setAxFrame(_ topLeft: Point?, _ size: CGSize?) {
+        appliedFramesForTest.append((topLeft, size))
+    }
 }
 
 extension OpaqueWindowId: ExpressibleByIntegerLiteral {

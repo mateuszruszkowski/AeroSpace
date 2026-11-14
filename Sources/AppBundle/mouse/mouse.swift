@@ -2,7 +2,9 @@ import AppKit
 import Common
 
 @MainActor var currentlyManipulatedWithMouseWindowId: OpaqueWindowId? = nil
-var isLeftMouseButtonDown: Bool { NSEvent.pressedMouseButtons == 1 }
+nonisolated(unsafe) var isLeftMouseButtonDownForTests: Bool? = nil
+@MainActor var mouseLocationForTests: Point? = nil
+var isLeftMouseButtonDown: Bool { unsafe isLeftMouseButtonDownForTests ?? (NSEvent.pressedMouseButtons == 1) }
 
 @MainActor
 func isManipulatedWithMouse(_ window: Window) async throws -> Bool {
@@ -41,7 +43,7 @@ private let resizeBorderWidth: CGFloat = 10
 }
 
 /// Same motivation as in monitorFrameNormalized
-var mouseLocation: Point { NSEvent.mouseLocation.asMyPoint.withYAxisFlipped }
+@MainActor var mouseLocation: Point { mouseLocationForTests ?? NSEvent.mouseLocation.asMyPoint.withYAxisFlipped }
 
 /// nil if the accessibility hit test fails, e.g. the app under the mouse doesn't respond
 @concurrent

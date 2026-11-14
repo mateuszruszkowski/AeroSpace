@@ -28,6 +28,7 @@ final class TestApp: AbstractApp {
     }
 
     private var _focusedWindow: Window? = nil
+    var onNextGetFocusedWindowForTest: (@MainActor () async throws -> ())?
     var focusedWindow: Window? {
         get { _focusedWindow }
         set {
@@ -37,5 +38,12 @@ final class TestApp: AbstractApp {
             _focusedWindow = newValue
         }
     }
-    @MainActor func getFocusedWindow(_ cm: CancellationMode) -> Window? { _focusedWindow }
+    @MainActor func getFocusedWindow(_ cm: CancellationMode) async throws -> Window? {
+        if let hook = onNextGetFocusedWindowForTest {
+            onNextGetFocusedWindowForTest = nil
+            try await hook()
+        }
+        try checkCancellation(cm)
+        return _focusedWindow
+    }
 }
