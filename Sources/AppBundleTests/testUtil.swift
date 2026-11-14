@@ -45,6 +45,16 @@ struct SerializedGloballyTrait: SuiteTrait, TestTrait, TestScoping {
 
 @MainActor
 func setUpWorkspacesForTests() {
+    cancelMoveWithMouse()
+    resetManipulatedWithMouseIfPossible(scheduleRefresh: false)
+    unsafe isLeftMouseButtonDownForTests = nil
+    mouseLocationForTests = nil
+    onCompleteRefreshScheduledForTests = nil
+    TestApp.shared.onNextGetFocusedWindowForTest = nil
+    TestApp.shared.focusedWindowReadCountForTest = 0
+    TrayMenuModel.shared.isEnabled = true
+    unsafe monitorInfosForTests = nil
+    gcMonitors()
     config = defaultConfig
     configUrl = defaultConfigUrl
     config.enableNormalizationFlattenContainers = false // Make layout tests more predictable

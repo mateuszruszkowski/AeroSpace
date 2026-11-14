@@ -56,14 +56,17 @@ enum GlobalObserver {
         NSEvent.addGlobalMonitorForEvents(matching: .leftMouseDown) { @MainActor event in
             onLeftMouseDown(event.locationInWindow.asMyPoint.withYAxisFlipped)
         }
-        NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { _ in
+        NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { @MainActor event in
+            let mouseLocation = event.locationInWindow.asMyPoint.withYAxisFlipped
+            let generation = mouseDownGeneration
+            let moveCompletion = endMoveWithMouse(at: mouseLocation)
             guard let token: RunSessionGuard = .isServerEnabled else { return }
             // todo reduce number of refreshSession in the callback
             //  resetManipulatedWithMouseIfPossible might call its own refreshSession
             //  The end of the callback calls refreshSession
             Task.startUnstructured { @MainActor in
-                try await resetManipulatedWithMouseIfPossible()
-                let mouseLocation = mouseLocation
+                try await moveCompletion.value
+                guard generation == mouseDownGeneration, TrayMenuModel.shared.isEnabled else { return }
                 let clickedMonitor = mouseLocation.monitorApproximation
                 let isOtherMonitorClick =
                     clickedMonitor.visibleRect.contains(mouseLocation) && clickedMonitor.visibleWorkspace != globalFocus.workspace

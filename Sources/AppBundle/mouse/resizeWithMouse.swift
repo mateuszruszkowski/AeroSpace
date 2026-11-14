@@ -9,6 +9,7 @@ func resizedObs(_: AXObserver, ax: AXUIElement, notif: CFString, _: UnsafeMutabl
     let nativeWindowId = ax.containingNativeWindowId()
     let pid = ax.pid
     Task.startUnstructured { @MainActor in
+        let generation = mouseDownGeneration
         guard let token: RunSessionGuard = .isServerEnabled else { return }
         guard let nativeWindowId,
               let pid,
@@ -22,6 +23,7 @@ func resizedObs(_: AXObserver, ax: AXUIElement, notif: CFString, _: UnsafeMutabl
         resizeWithMouseTask = Task.startUnstructured {
             try checkCancellation()
             try await runLightSession(.ax(notif), token) {
+                guard generation == mouseDownGeneration, isLeftMouseButtonDown else { return }
                 try await resizeWithMouse(window)
             }
         }
@@ -29,13 +31,15 @@ func resizedObs(_: AXObserver, ax: AXUIElement, notif: CFString, _: UnsafeMutabl
 }
 
 @MainActor
-func resetManipulatedWithMouseIfPossible() async throws {
+func resetManipulatedWithMouseIfPossible(scheduleRefresh: Bool = true) {
     if currentlyManipulatedWithMouseWindowId != nil {
         currentlyManipulatedWithMouseWindowId = nil
         for workspace in Workspace.all {
             workspace.resetResizeWeightBeforeResizeRecursive()
         }
-        scheduleCancellableCompleteRefreshSession(.resetManipulatedWithMouse, optimisticallyPreLayoutWorkspaces: true)
+        if scheduleRefresh {
+            scheduleCancellableCompleteRefreshSession(.resetManipulatedWithMouse, optimisticallyPreLayoutWorkspaces: true)
+        }
     }
 }
 
@@ -43,6 +47,7 @@ private let adaptiveWeightBeforeResizeWithMouseKey = TreeNodeUserDataKey<CGFloat
 
 @MainActor
 private func resizeWithMouse(_ window: Window) async throws { // todo cover with tests
+    let generation = mouseDownGeneration
     resetClosedWindowsCache()
     switch window.windowParentCases {
         case nil: return
@@ -51,6 +56,7 @@ private func resizeWithMouse(_ window: Window) async throws { // todo cover with
             return // Nothing to do for floating, or unconventional windows
         case .tilingContainer:
             guard let rect = try await window.getAxRect(.cancellable) else { return }
+            guard generation == mouseDownGeneration, isLeftMouseButtonDown else { return }
             guard let lastAppliedLayoutRect = window.lastAppliedLayoutPhysicalRect else { return }
             let (lParent, lOwnIndex, _) = window.closestParent(hasInhabitedChildrenInDirection: .left, withLayout: .tiles) ?? (nil, nil, nil)
             let (dParent, dOwnIndex, _) = window.closestParent(hasInhabitedChildrenInDirection: .down, withLayout: .tiles) ?? (nil, nil, nil)

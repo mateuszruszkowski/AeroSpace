@@ -2,7 +2,34 @@ import AppKit
 import Common
 
 @MainActor
-private var moveWithMouseTask: Task<(), any Error>? = nil
+private final class MouseMoveGesture {
+    let generation: UInt64
+    var window: Window
+    var parent: NonLeafTreeNodeObject?
+    var candidates: [OpaqueWindowId: (Window, NonLeafTreeNodeObject?)]
+    var accepted = false
+    var pending = true
+    var releaseLocation: Point?
+    var task: Task<(), any Error>?
+
+    init(_ window: Window) {
+        generation = mouseDownGeneration
+        self.window = window
+        parent = window.parent
+        candidates = [window.windowId: (window, window.parent)]
+    }
+
+    var belongsToCurrentPress: Bool {
+        mouseMoveGesture === self && generation == mouseDownGeneration && TrayMenuModel.shared.isEnabled
+    }
+
+    var isCurrent: Bool {
+        belongsToCurrentPress && window.lifeStatus != .dead &&
+            window.parent != nil && window.parent === parent && Window.get(byId: window.windowId) === window
+    }
+}
+
+@MainActor private var mouseMoveGesture: MouseMoveGesture?
 
 func movedObs(_: AXObserver, ax: AXUIElement, notif: CFString, _: UnsafeMutableRawPointer?) {
     let nativeWindowId = ax.containingNativeWindowId()
@@ -18,49 +45,136 @@ func movedObs(_: AXObserver, ax: AXUIElement, notif: CFString, _: UnsafeMutableR
 @discardableResult
 func onWindowMoved(_ window: Window?, notif: String = kAXMovedNotification) async throws -> Task<(), any Error>? {
     guard let token: RunSessionGuard = .isServerEnabled else { return nil }
-    guard let window, try await isManipulatedWithMouse(window) else {
+    guard let window, canBeManipulatedWithMouse(window) else {
         scheduleCancellableCompleteRefreshSession(.ax(notif))
         return nil
     }
-    moveWithMouseTask?.cancel()
+    if let gesture = mouseMoveGesture {
+        guard gesture.belongsToCurrentPress, gesture.releaseLocation == nil else { return gesture.task }
+        if gesture.accepted {
+            guard gesture.isCurrent, gesture.window === window else { return gesture.task }
+        } else {
+            gesture.candidates[window.windowId] = (window, window.parent)
+        }
+        gesture.pending = true
+        return startMoveWithMouseTask(gesture, notif: notif, token)
+    }
+    switch window.windowParentCases {
+        case .tilingContainer, .floatingWindowsContainer: break
+        default: return nil
+    }
+    let gesture = MouseMoveGesture(window)
+    mouseMoveGesture = gesture
+    return startMoveWithMouseTask(gesture, notif: notif, token)
+}
+
+@MainActor
+private func startMoveWithMouseTask(_ gesture: MouseMoveGesture, notif: String, _ token: RunSessionGuard) -> Task<(), any Error> {
+    if let task = gesture.task { return task }
     let task = Task.startUnstructured {
-        try checkCancellation()
-        try await runLightSession(.ax(notif), token) {
-            try await moveWithMouse(window)
+        defer {
+            gesture.task = nil
+            if mouseMoveGesture === gesture && !gesture.isCurrent {
+                mouseMoveGesture = nil
+                resetManipulatedWithMouseIfPossible(scheduleRefresh: false)
+            }
+        }
+        if !gesture.accepted {
+            guard let focused = try await getNativeFocusedWindow(.cancellable),
+                  gesture.belongsToCurrentPress,
+                  let (candidate, parent) = gesture.candidates[focused.windowId], candidate === focused,
+                  focused.parent != nil, focused.parent === parent, focused.lifeStatus != .dead,
+                  Window.get(byId: focused.windowId) === focused
+            else {
+                if mouseMoveGesture === gesture {
+                    if gesture.belongsToCurrentPress { scheduleCancellableCompleteRefreshSession(.ax(notif)) }
+                    mouseMoveGesture = nil
+                }
+                return
+            }
+            gesture.window = focused
+            gesture.parent = parent
+            gesture.candidates.removeAll()
+            gesture.accepted = true
+            currentlyManipulatedWithMouseWindowId = focused.windowId
+        }
+        let window = gesture.window
+        while gesture.pending && gesture.isCurrent {
+            gesture.pending = false
+            try await runLightSession(.ax(notif), token) {
+                guard gesture.isCurrent else { return }
+                try await moveWithMouse(window, at: gesture.releaseLocation ?? mouseLocation, gesture: gesture)
+            }
         }
     }
-    moveWithMouseTask = task
+    gesture.task = task
     return task
 }
 
 @MainActor
-private func moveWithMouse(_ window: Window) async throws { // todo cover with tests
+func cancelMoveWithMouse() {
+    let previous = mouseMoveGesture
+    mouseMoveGesture = nil
+    previous?.task?.cancel()
+}
+
+/// Capture release before yielding: a suspended eligibility/layout read belongs to this gesture until it drains.
+@MainActor
+func endMoveWithMouse(at location: Point) -> Task<(), any Error> {
+    if RunSessionGuard.isServerEnabled == nil {
+        cancelMoveWithMouse()
+        resetManipulatedWithMouseIfPossible(scheduleRefresh: false)
+        return Task.startUnstructured {}
+    }
+    let generation = mouseDownGeneration
+    let gesture = mouseMoveGesture
+    gesture?.releaseLocation = location
+    gesture?.pending = true
+    let task: Task<(), any Error>? = if let gesture, gesture.isCurrent, let token = RunSessionGuard.isServerEnabled {
+        startMoveWithMouseTask(gesture, notif: kAXMovedNotification, token)
+    } else {
+        gesture?.task
+    }
+    return Task.startUnstructured {
+        defer {
+            if generation == mouseDownGeneration {
+                if mouseMoveGesture === gesture { mouseMoveGesture = nil }
+                resetManipulatedWithMouseIfPossible()
+            }
+        }
+        try await task?.value
+    }
+}
+
+@MainActor
+private func moveWithMouse(_ window: Window, at location: Point, gesture: MouseMoveGesture) async throws {
     resetClosedWindowsCache()
     switch window.windowParentCases {
         case .floatingWindowsContainer:
-            try await moveFloatingWindow(window)
+            try await moveFloatingWindow(window, gesture: gesture)
         case .macosFullscreenWindowsContainer, .macosMinimizedWindowsContainer, .macosPopupWindowsContainer, .macosHiddenAppsWindowsContainer:
             return // Unconventional windows can't be moved with mouse
         case .tilingContainer:
-            moveTilingWindow(window)
+            moveTilingWindow(window, at: location)
+            gesture.parent = window.parent
         case nil: return
     }
 }
 
 @MainActor
-private func moveFloatingWindow(_ window: Window) async throws {
+private func moveFloatingWindow(_ window: Window, gesture: MouseMoveGesture) async throws {
     guard let targetWorkspace = try await window.getCenter(.cancellable)?.monitorApproximation.visibleWorkspace else { return }
-    guard let parent = window.parent else { return }
+    guard gesture.isCurrent, let parent = window.parent else { return }
     if targetWorkspace != parent {
         window.bindAsFloatingWindow(to: targetWorkspace)
+        gesture.parent = window.parent
     }
 }
 
 @MainActor
-private func moveTilingWindow(_ window: Window) {
+private func moveTilingWindow(_ window: Window, at mouseLocation: Point) {
     currentlyManipulatedWithMouseWindowId = window.windowId
     window.lastAppliedLayoutPhysicalRect = nil
-    let mouseLocation = mouseLocation
     let targetWorkspace = mouseLocation.monitorApproximation.visibleWorkspace
     let swapTarget = mouseLocation
         .findWindowRecursively(in: targetWorkspace.rootTilingContainer, virtual: false, fullscreenCoversAll: false)?

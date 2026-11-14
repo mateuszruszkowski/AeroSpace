@@ -94,6 +94,8 @@ private let testMonitorInfo = MonitorInfoImpl(
     isMain: true,
 )
 
+nonisolated(unsafe) var monitorInfosForTests: [MonitorInfo]? = nil
+
 var mainMonitorInfo: MonitorInfo {
     if isUnitTest { return testMonitorInfo }
     let screens = NSScreen.screens
@@ -106,7 +108,7 @@ var mainMonitorInfo: MonitorInfo {
 
 var globalUnsortedMonitorInfos: [MonitorInfo] {
     isUnitTest
-        ? [testMonitorInfo]
+        ? unsafe monitorInfosForTests ?? [testMonitorInfo]
         : NSScreen.screens.enumerated().map { $0.element.toMonitorInfo(monitorAppKitNsScreenScreensId: $0.offset + 1) }
 }
 

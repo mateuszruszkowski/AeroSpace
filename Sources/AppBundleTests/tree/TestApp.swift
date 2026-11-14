@@ -29,6 +29,7 @@ final class TestApp: AbstractApp {
 
     private var _focusedWindow: Window? = nil
     var onNextGetFocusedWindowForTest: (@MainActor () async throws -> ())?
+    var focusedWindowReadCountForTest = 0
     var focusedWindow: Window? {
         get { _focusedWindow }
         set {
@@ -39,6 +40,7 @@ final class TestApp: AbstractApp {
         }
     }
     @MainActor func getFocusedWindow(_ cm: CancellationMode) async throws -> Window? {
+        focusedWindowReadCountForTest += 1
         if let hook = onNextGetFocusedWindowForTest {
             onNextGetFocusedWindowForTest = nil
             try await hook()

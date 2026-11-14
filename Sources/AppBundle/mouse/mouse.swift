@@ -2,17 +2,25 @@ import AppKit
 import Common
 
 @MainActor var currentlyManipulatedWithMouseWindowId: OpaqueWindowId? = nil
+@MainActor private(set) var mouseDownGeneration: UInt64 = 0
 nonisolated(unsafe) var isLeftMouseButtonDownForTests: Bool? = nil
 @MainActor var mouseLocationForTests: Point? = nil
 var isLeftMouseButtonDown: Bool { unsafe isLeftMouseButtonDownForTests ?? (NSEvent.pressedMouseButtons == 1) }
 
 @MainActor
 func isManipulatedWithMouse(_ window: Window) async throws -> Bool {
-    try await (!window.isHiddenInCorner && // Don't allow to resize/move windows of hidden workspaces
+    let generation = mouseDownGeneration
+    guard canBeManipulatedWithMouse(window) else { return false }
+    return try await getNativeFocusedWindow(.cancellable) == window &&
+        generation == mouseDownGeneration && isLeftMouseButtonDown
+}
+
+@MainActor
+func canBeManipulatedWithMouse(_ window: Window) -> Bool {
+    !window.isHiddenInCorner && // Don't allow to resize/move windows of hidden workspaces
         isLeftMouseButtonDown &&
         isUnderLeftMouseDown(window) &&
-        (currentlyManipulatedWithMouseWindowId == nil || window.windowId == currentlyManipulatedWithMouseWindowId))
-        .andAsync { @Sendable @MainActor in try await getNativeFocusedWindow(.cancellable) == window }
+        (currentlyManipulatedWithMouseWindowId == nil || window.windowId == currentlyManipulatedWithMouseWindowId)
 }
 
 /// Tiling windows whose layout rect, widened by resizeBorderWidth, contained the last left mouse down location.
@@ -26,6 +34,9 @@ func isManipulatedWithMouse(_ window: Window) async throws -> Bool {
 private let resizeBorderWidth: CGFloat = 10
 
 @MainActor func onLeftMouseDown(_ location: Point) {
+    mouseDownGeneration &+= 1
+    cancelMoveWithMouse()
+    resetManipulatedWithMouseIfPossible(scheduleRefresh: false)
     windowIdsUnderLeftMouseDown = windowIdsUnder(location, in: Workspace.all.filter(\.isVisible))
 }
 
