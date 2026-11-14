@@ -42,6 +42,7 @@ struct MoveWithMouseTest {
     @Test func testPendingSessionDrainsBurstAndFinalizesAtCapturedReleasePoint() async throws {
         defer { resetInput() }
         let (window, source, target) = fixture()
+        window.isFullscreen = true
         let (suspended, resume) = suspendNextSession()
         let first = try await onWindowMoved(window)
         try await suspended.await(.cancellable)
@@ -64,6 +65,9 @@ struct MoveWithMouseTest {
         let settled = window.appliedFramesForTest.count
         try await target.layoutWorkspace()
         #expect(window.appliedFramesForTest.count == settled + 1)
+        #expect(window.isFullscreen)
+        #expect(window.appliedFramesForTest.last?.0 == target.workspaceMonitorInfo.visibleRect.topLeftCorner)
+        #expect(window.appliedFramesForTest.last?.1?.width == target.workspaceMonitorInfo.visibleRect.width)
     }
 
     @Test func testNotificationAfterPreviousDrainAndReleaseBothRun() async throws {
