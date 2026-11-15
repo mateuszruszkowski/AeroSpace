@@ -84,6 +84,35 @@ struct MoveWithMouseTest {
         #expect(currentlyManipulatedWithMouseWindowId == nil)
     }
 
+    @Test func testCrossMonitorDragKeepsNativeFocusWhenSourceWorkspaceHasSibling() async throws {
+        defer { resetInput() }
+        let (window, source, target) = fixture()
+        window.isFullscreen = true
+        let sibling = TestWindow.new(id: 2, parent: source.rootTilingContainer)
+        #expect(window.focusWindow())
+        window.nativeFocus()
+        mouseLocationForTests = Point(x: 2200, y: 100)
+        try await onWindowMoved(window)?.value
+        #expect(window.nodeWorkspace === target)
+        #expect(TestApp.shared.focusedWindow === window)
+        #expect(globalFocus.windowOrNil === window)
+        #expect(TestApp.shared.focusedWindow !== sibling)
+
+        unsafe isLeftMouseButtonDownForTests = false
+        try await endMoveWithMouse(at: Point(x: 2200, y: 100)).value
+        unsafe isLeftMouseButtonDownForTests = true
+        onLeftMouseDown(Point(x: 2200, y: 100))
+        mouseLocationForTests = Point(x: 100, y: 100)
+        let reverse = try await onWindowMoved(window)
+        #expect(reverse != nil)
+        try await reverse?.value
+        unsafe isLeftMouseButtonDownForTests = false
+        try await endMoveWithMouse(at: Point(x: 100, y: 100)).value
+        #expect(window.nodeWorkspace === source)
+        #expect(TestApp.shared.focusedWindow === window)
+        #expect(currentlyManipulatedWithMouseWindowId == nil)
+    }
+
     @Test func testFloatingWindowRemainsUntouchedWhileSessionIsPending() async throws {
         defer { resetInput() }
         let (window, source, target) = fixture(floating: true)
