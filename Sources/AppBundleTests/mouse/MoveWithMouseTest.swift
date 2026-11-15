@@ -164,6 +164,44 @@ struct MoveWithMouseTest {
         #expect(currentlyManipulatedWithMouseWindowId == nil)
     }
 
+    @Test(arguments: [false, true])
+    func testRegrabRemainsAttributedWhenPendingOldLayoutMaterializesItsRect(fullscreen: Bool) async throws {
+        defer { resetInput() }
+        let (window, source, target) = fixture()
+        window.isFullscreen = fullscreen
+        try await source.layoutWorkspace()
+        onLeftMouseDown(Point(x: 100, y: 100))
+        mouseLocationForTests = Point(x: 2200, y: 100)
+        try await onWindowMoved(window)?.value
+        #expect(window.nodeWorkspace === target)
+        #expect(window.lastAppliedLayoutPhysicalRect == nil)
+
+        let suspended = AwaitableOneTimeBroadcastLatch()
+        let resume = AwaitableOneTimeBroadcastLatch()
+        TestApp.shared.onNextGetFocusedWindowForTest = {
+            await suspended.signalToAll()
+            try await resume.await(.nonCancellable)
+        }
+        unsafe isLeftMouseButtonDownForTests = false
+        let oldRelease = endMoveWithMouse(at: Point(x: 2200, y: 100))
+        try await suspended.await(.cancellable)
+
+        unsafe isLeftMouseButtonDownForTests = true
+        onLeftMouseDown(Point(x: 2200, y: 100))
+        try await target.layoutWorkspace()
+        #expect((window.lastAppliedLayoutPhysicalRect == nil) == fullscreen)
+        mouseLocationForTests = Point(x: 100, y: 100)
+        let reverse = try await onWindowMoved(window)
+        #expect(reverse != nil)
+        await resume.signalToAll()
+        _ = try? await oldRelease.value
+        try await reverse?.value
+        unsafe isLeftMouseButtonDownForTests = false
+        try await endMoveWithMouse(at: Point(x: 100, y: 100)).value
+        #expect(window.nodeWorkspace === source)
+        #expect(currentlyManipulatedWithMouseWindowId == nil)
+    }
+
     @Test func testDisablingServerDuringPendingSessionPreventsRebind() async throws {
         defer { resetInput() }
         let (window, source, _) = fixture()
