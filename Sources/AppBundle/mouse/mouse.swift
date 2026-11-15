@@ -41,9 +41,6 @@ private let resizeBorderWidth: CGFloat = 10
     let withoutLayout = workspaces.flatMap(\.rootTilingContainer.allLeafWindowsRecursive)
         .filter { $0.lastAppliedLayoutPhysicalRect == nil }.map(\.windowId)
     windowIdsUnderLeftMouseDown = windowIdsUnder(location, in: workspaces).union(withoutLayout)
-    #if DRAG_DIAGNOSTICS
-        dragDiagnosticBeginPress(location, ids: windowIdsUnderLeftMouseDown, windows: workspaces.flatMap(\.rootTilingContainer.allLeafWindowsRecursive))
-    #endif
 }
 
 @MainActor func windowIdsUnder(_ location: Point, in workspaces: [Workspace]) -> Set<OpaqueWindowId> {
@@ -58,13 +55,6 @@ private let resizeBorderWidth: CGFloat = 10
 @MainActor private func isUnderLeftMouseDown(_ window: Window) -> Bool {
     window.lastAppliedLayoutPhysicalRect == nil || windowIdsUnderLeftMouseDown.contains(window.windowId)
 }
-
-#if DRAG_DIAGNOSTICS
-    @MainActor func dragDiagnosticAttribution(_ window: Window?) -> String {
-        guard let window else { return "unresolved-window" }
-        return "hidden=\(window.isHiddenInCorner) snapshot=\(windowIdsUnderLeftMouseDown.contains(window.windowId)) nilRect=\(window.lastAppliedLayoutPhysicalRect == nil)"
-    }
-#endif
 
 /// Same motivation as in monitorFrameNormalized
 @MainActor var mouseLocation: Point { mouseLocationForTests ?? NSEvent.mouseLocation.asMyPoint.withYAxisFlipped }

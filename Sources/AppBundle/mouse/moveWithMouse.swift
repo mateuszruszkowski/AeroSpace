@@ -27,12 +27,6 @@ private final class MouseMoveGesture {
         belongsToCurrentPress && window.lifeStatus != .dead &&
             window.parent != nil && window.parent === parent && Window.get(byId: window.windowId) === window
     }
-
-    #if DRAG_DIAGNOSTICS
-        var diagnosticState: String {
-            "sameGesture=\(mouseMoveGesture === self) accepted=\(accepted) pending=\(pending) released=\(releaseLocation != nil) expectedParent=\(parent.map { String(describing: ObjectIdentifier($0)) } ?? "nil") alive=\(window.lifeStatus != .dead) sameRegistered=\(Window.get(byId: window.windowId) === window)"
-        }
-    #endif
 }
 
 @MainActor private var mouseMoveGesture: MouseMoveGesture?
@@ -51,30 +45,14 @@ func movedObs(_: AXObserver, ax: AXUIElement, notif: CFString, _: UnsafeMutableR
 @discardableResult
 func onWindowMoved(_ window: Window?, notif: String = kAXMovedNotification) async throws -> Task<(), any Error>? {
     guard let token: RunSessionGuard = .isServerEnabled else { return nil }
-    #if DRAG_DIAGNOSTICS
-        dragDiagnostic("moved", window)
-    #endif
     guard let window, canBeManipulatedWithMouse(window) else {
-        #if DRAG_DIAGNOSTICS
-            dragDiagnostic("reject-attribution", window, details: dragDiagnosticAttribution(window))
-        #endif
         scheduleCancellableCompleteRefreshSession(.ax(notif))
         return nil
     }
     if let gesture = mouseMoveGesture {
-        guard gesture.belongsToCurrentPress, gesture.releaseLocation == nil else {
-            #if DRAG_DIAGNOSTICS
-                dragDiagnostic("reject-existing", window, generation: gesture.generation, details: gesture.diagnosticState)
-            #endif
-            return gesture.task
-        }
+        guard gesture.belongsToCurrentPress, gesture.releaseLocation == nil else { return gesture.task }
         if gesture.accepted {
-            guard gesture.isCurrent, gesture.window === window else {
-                #if DRAG_DIAGNOSTICS
-                    dragDiagnostic("reject-accepted", window, generation: gesture.generation, details: gesture.diagnosticState)
-                #endif
-                return gesture.task
-            }
+            guard gesture.isCurrent, gesture.window === window else { return gesture.task }
         } else {
             gesture.candidates[window.windowId] = (window, window.parent)
         }
@@ -95,9 +73,6 @@ private func startMoveWithMouseTask(_ gesture: MouseMoveGesture, notif: String, 
     if let task = gesture.task { return task }
     let task = Task.startUnstructured {
         defer {
-            #if DRAG_DIAGNOSTICS
-                dragDiagnostic("worker-end-cancelled-\(Task.isCancelled)", gesture.window, generation: gesture.generation, details: gesture.diagnosticState)
-            #endif
             gesture.task = nil
             if mouseMoveGesture === gesture && !gesture.isCurrent {
                 mouseMoveGesture = nil
@@ -105,14 +80,7 @@ private func startMoveWithMouseTask(_ gesture: MouseMoveGesture, notif: String, 
             }
         }
         if !gesture.accepted {
-            #if DRAG_DIAGNOSTICS
-                dragDiagnostic("eligibility-start", gesture.window, generation: gesture.generation)
-            #endif
-            let focused = try await getNativeFocusedWindow(.cancellable)
-            #if DRAG_DIAGNOSTICS
-                dragDiagnostic("eligibility-result", focused, generation: gesture.generation, details: "candidates=\(gesture.candidates.keys.map(\.rawId).sorted()) \(gesture.diagnosticState)")
-            #endif
-            guard let focused,
+            guard let focused = try await getNativeFocusedWindow(.cancellable),
                   gesture.belongsToCurrentPress,
                   let (candidate, parent) = gesture.candidates[focused.windowId], candidate === focused,
                   focused.parent != nil, focused.parent === parent, focused.lifeStatus != .dead,
@@ -129,24 +97,13 @@ private func startMoveWithMouseTask(_ gesture: MouseMoveGesture, notif: String, 
             gesture.candidates.removeAll()
             gesture.accepted = true
             currentlyManipulatedWithMouseWindowId = focused.windowId
-            #if DRAG_DIAGNOSTICS
-                dragDiagnostic("accepted", focused, generation: gesture.generation, details: gesture.diagnosticState)
-            #endif
         }
         let window = gesture.window
         while gesture.pending && gesture.isCurrent {
             gesture.pending = false
             try await runLightSession(.ax(notif), token) {
-                guard gesture.isCurrent else {
-                    #if DRAG_DIAGNOSTICS
-                        dragDiagnostic("reject-body", window, generation: gesture.generation, details: gesture.diagnosticState)
-                    #endif
-                    return
-                }
+                guard gesture.isCurrent else { return }
                 try await moveWithMouse(window, at: gesture.releaseLocation ?? mouseLocation, gesture: gesture)
-                #if DRAG_DIAGNOSTICS
-                    dragDiagnostic("body-workspace-\(window.nodeWorkspace?.name ?? "nil")", window, generation: gesture.generation, details: gesture.diagnosticState)
-                #endif
             }
         }
     }
@@ -157,9 +114,6 @@ private func startMoveWithMouseTask(_ gesture: MouseMoveGesture, notif: String, 
 @MainActor
 func cancelMoveWithMouse() {
     let previous = mouseMoveGesture
-    #if DRAG_DIAGNOSTICS
-        if let previous { dragDiagnostic("cancel", previous.window, generation: previous.generation, details: previous.diagnosticState, always: true) }
-    #endif
     mouseMoveGesture = nil
     previous?.task?.cancel()
 }
@@ -174,9 +128,6 @@ func endMoveWithMouse(at location: Point) -> Task<(), any Error> {
     }
     let generation = mouseDownGeneration
     let gesture = mouseMoveGesture
-    #if DRAG_DIAGNOSTICS
-        dragDiagnostic("up", gesture?.window, generation: generation, details: "cursor=\(location.x),\(location.y) state=\(gesture?.diagnosticState ?? "nil") counts=\(dragDiagnosticCounters())", always: true)
-    #endif
     gesture?.releaseLocation = location
     gesture?.pending = true
     let task: Task<(), any Error>? = if let gesture, gesture.isCurrent, let token = RunSessionGuard.isServerEnabled {
@@ -186,9 +137,6 @@ func endMoveWithMouse(at location: Point) -> Task<(), any Error> {
     }
     return Task.startUnstructured {
         defer {
-            #if DRAG_DIAGNOSTICS
-                dragDiagnostic("up-completion", gesture?.window, generation: generation, details: "reset=\(generation == mouseDownGeneration) state=\(gesture?.diagnosticState ?? "nil")", always: true)
-            #endif
             if generation == mouseDownGeneration {
                 if mouseMoveGesture === gesture { mouseMoveGesture = nil }
                 resetManipulatedWithMouseIfPossible()
