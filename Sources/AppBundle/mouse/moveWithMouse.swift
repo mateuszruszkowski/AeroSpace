@@ -159,6 +159,7 @@ private func moveWithMouse(_ window: Window, at location: Point, gesture: MouseM
             gesture.parent = window.parent
         case nil: return
     }
+    if gesture.isCurrent { _ = window.focusWindow() }
 }
 
 @MainActor

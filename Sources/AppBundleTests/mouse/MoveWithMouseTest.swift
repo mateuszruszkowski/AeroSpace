@@ -97,9 +97,11 @@ struct MoveWithMouseTest {
         #expect(TestApp.shared.focusedWindow === window)
         #expect(globalFocus.windowOrNil === window)
         #expect(TestApp.shared.focusedWindow !== sibling)
+        #expect(window.isFullscreen)
 
         unsafe isLeftMouseButtonDownForTests = false
         try await endMoveWithMouse(at: Point(x: 2200, y: 100)).value
+        try await target.layoutWorkspace()
         unsafe isLeftMouseButtonDownForTests = true
         onLeftMouseDown(Point(x: 2200, y: 100))
         mouseLocationForTests = Point(x: 100, y: 100)
@@ -108,8 +110,11 @@ struct MoveWithMouseTest {
         try await reverse?.value
         unsafe isLeftMouseButtonDownForTests = false
         try await endMoveWithMouse(at: Point(x: 100, y: 100)).value
+        try await source.layoutWorkspace()
         #expect(window.nodeWorkspace === source)
         #expect(TestApp.shared.focusedWindow === window)
+        #expect(window.isFullscreen)
+        #expect(window.appliedFramesForTest.last?.1?.width == source.workspaceMonitorInfo.visibleRect.width)
         #expect(currentlyManipulatedWithMouseWindowId == nil)
     }
 
