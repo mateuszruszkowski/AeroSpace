@@ -5,6 +5,7 @@ import PackageDescription
 import Foundation
 
 var swiftSettings: [SwiftSetting] = [
+    .define("DRAG_DIAGNOSTICS"),
     .enableUpcomingFeature("NonisolatedNonsendingByDefault"),
     .strictMemorySafety(),
 ]
