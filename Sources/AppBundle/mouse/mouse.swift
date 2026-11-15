@@ -23,7 +23,7 @@ func canBeManipulatedWithMouse(_ window: Window) -> Bool {
         (currentlyManipulatedWithMouseWindowId == nil || window.windowId == currentlyManipulatedWithMouseWindowId)
 }
 
-/// Tiling windows whose layout rect, widened by resizeBorderWidth, contained the last left mouse down location.
+/// Tiling windows whose layout rect, widened by resizeBorderWidth, contained mouse down, or had no rect at mouse down.
 /// A move or resize that comes while the button is down counts as a mouse drag only for these windows. Otherwise
 /// AeroSpace's own moves look like drags: when an app activates a window of a hidden workspace during a click
 /// elsewhere, unhiding the window moves it, and the window was moved to the workspace under the mouse.
@@ -37,7 +37,10 @@ private let resizeBorderWidth: CGFloat = 10
     mouseDownGeneration &+= 1
     cancelMoveWithMouse()
     resetManipulatedWithMouseIfPossible(scheduleRefresh: false)
-    windowIdsUnderLeftMouseDown = windowIdsUnder(location, in: Workspace.all.filter(\.isVisible))
+    let workspaces = Workspace.all.filter(\.isVisible)
+    let withoutLayout = workspaces.flatMap(\.rootTilingContainer.allLeafWindowsRecursive)
+        .filter { $0.lastAppliedLayoutPhysicalRect == nil }.map(\.windowId)
+    windowIdsUnderLeftMouseDown = windowIdsUnder(location, in: workspaces).union(withoutLayout)
 }
 
 @MainActor func windowIdsUnder(_ location: Point, in workspaces: [Workspace]) -> Set<OpaqueWindowId> {
